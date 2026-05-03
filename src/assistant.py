@@ -2,9 +2,11 @@ from dataclasses import dataclass
 from langchain.chat_models import init_chat_model
 from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse
 from langchain.tools import tool
-from typing import Callable, List
+from typing import Callable, List, Dict, Any
 from deepagents import create_deep_agent
 from src.ingestion_service import query_embedding
+from src.mongo_client import ConversationCRUD
+from datetime import datetime
 
 agent = None
 
@@ -75,10 +77,111 @@ def init_agent():
         tools=tools,
     )
 
+
+def _get_or_create_conversation(thread_id: str, user_id: str) -> str:
+    """
+    Fetch existing conversation by thread_id, or create a new one if it doesn't exist.
+    
+    Args:
+        thread_id: The thread ID to look up or create
+        user_id: The user ID for creating new conversation
+        
+    Returns:
+        The conversation ID (document _id as string)
+    """
+    # Try to fetch existing conversation by thread_id
+    existing_conversation = ConversationCRUD.read_by_thread_id(thread_id)
+    
+    if existing_conversation:
+        return str(existing_conversation["_id"])
+    
+    # Create new conversation if it doesn't exist
+    conversation_data = {
+        "thread_id": thread_id,
+        "user_id": user_id,
+        "messages": [],
+        "created_at": datetime.now(),
+        "updated_at": datetime.now(),
+    }
+    
+    conversation_id = ConversationCRUD.create(conversation_data)
+    return conversation_id
+
+
+def _build_message_history(conversation_id: str, user_message: str) -> List[Dict[str, str]]:
+    """
+    Build complete message history from database plus the new user message.
+    
+    Args:
+        conversation_id: The conversation document ID
+        user_message: The new user message to add
+        
+    Returns:
+        List of message dictionaries with 'role' and 'content' keys
+    """
+    conversation = ConversationCRUD.read(conversation_id)
+    
+    # Start with previous messages
+    messages = []
+    if conversation and "messages" in conversation:
+        messages = conversation["messages"].copy()
+    
+    # Add the new user message
+    messages.append({
+        "role": "user",
+        "content": user_message,
+        "timestamp": datetime.now().isoformat()
+    })
+    
+    return messages
+
+
 #provide default model name and user message for testing
-def run_agent(model_name: str = "openai:gpt-4o-mini", user_message: str = "Hello!"):
+def run_agent(thread_id: str, user_id: str, model_name: str = "openai:gpt-4o-mini", user_message: str = "Hello!"):
+    """
+    Run the agent with conversation history management.
+    
+    Args:
+        thread_id: The conversation thread ID
+        user_id: The user ID
+        model_name: The model to use (default: openai:gpt-4o-mini)
+        user_message: The user's message
+        
+    Returns:
+        The agent's response and conversation ID
+    """
+    # Get or create conversation
+    conversation_id = _get_or_create_conversation(thread_id, user_id)
+    
+    # Build complete message history
+    messages = _build_message_history(conversation_id, user_message)
+    
+    # Invoke agent with complete message history
     result = agent.invoke(
-        {"messages": [{"role": "user", "content": user_message}]},
+        {"messages": messages},
         context=Context(model=model_name)
     )
-    return result
+    
+    # Extract assistant response
+    # Extract assistant response from the messages list
+    assistant_response = result['messages'][-1]
+    # Add user message to conversation
+    user_msg_record = {
+        "role": "user",
+        "content": user_message,
+        "timestamp": datetime.now().isoformat()
+    }
+    ConversationCRUD.add_message(conversation_id, user_msg_record)
+    
+    # Add assistant response to conversation
+    assistant_msg_record = {
+        "role": "assistant",
+        "content": assistant_response.content,
+        "timestamp": datetime.now().isoformat()
+    }
+    ConversationCRUD.add_message(conversation_id, assistant_msg_record)
+    
+    return {
+        "conversation_id": conversation_id,
+        "result": result
+    }

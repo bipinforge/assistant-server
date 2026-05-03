@@ -31,6 +31,6 @@ def _stream_response() -> Iterator[bytes]:
     yield b"Streaming response placeholder.\n"
 
 @router.post("/chat")
-def chat_completion(thread_id: str, model_name: str = "openai:gpt-4o-mini", user_message: str = "Hello!"):
-    return run_agent(model_name=model_name, user_message=user_message)
+def chat_completion(thread_id: str, user_id: str, model_name: str = "openai:gpt-4o-mini", user_message: str = "Hello!"):
+    return run_agent(thread_id=thread_id, user_id=user_id, model_name=model_name, user_message=user_message)
     #return StreamingResponse(_stream_response(), media_type="text/plain")
