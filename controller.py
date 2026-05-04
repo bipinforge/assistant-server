@@ -1,14 +1,21 @@
 from pathlib import Path
 from typing import Iterator
+
+from pydantic import BaseModel
 from src.file_service import store_file_details
 from src.assistant import init_agent, run_agent
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, File, UploadFile, Body
 from fastapi.responses import StreamingResponse
 
 from src.ingestion_service import query_embedding, ingest_file
 
 router = APIRouter()
 UPLOAD_DIR = Path.cwd() / "uploads"
+
+class ChatRequest(BaseModel):
+    user_id: str
+    model_name: str = "openai:gpt-4o-mini"
+    user_message: str = "Hello!"
 
 
 @router.post("/upload")
@@ -31,6 +38,11 @@ def _stream_response() -> Iterator[bytes]:
     yield b"Streaming response placeholder.\n"
 
 @router.post("/chat")
-def chat_completion(thread_id: str, user_id: str, model_name: str = "openai:gpt-4o-mini", user_message: str = "Hello!"):
-    return run_agent(thread_id=thread_id, user_id=user_id, model_name=model_name, user_message=user_message)
+def chat_completion(thread_id: str, payload: ChatRequest =  Body(...)):
+    return run_agent(
+        thread_id=thread_id,
+        user_id=payload.user_id,
+        model_name=payload.model_name,
+        user_message=payload.user_message,
+    )
     #return StreamingResponse(_stream_response(), media_type="text/plain")

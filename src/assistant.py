@@ -157,6 +157,7 @@ def run_agent(thread_id: str, user_id: str, model_name: str = "openai:gpt-4o-min
     messages = _build_message_history(conversation_id, user_message)
     
     # Invoke agent with complete message history
+    # streaming 
     result = agent.invoke(
         {"messages": messages},
         context=Context(model=model_name)

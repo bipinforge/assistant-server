@@ -19,6 +19,7 @@ def ingest_file(dir_path):
 
 def query_embedding(query):
     # query = "Who was ashoka?"
+    # lexical + semantic search = contextual search
     # results = vs.similarity_search(query, k=4)
 
     retriever = vs.as_retriever(search_kwargs={"k": 4})
