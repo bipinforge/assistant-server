@@ -7,6 +7,7 @@ from deepagents import create_deep_agent
 from src.ingestion_service import query_embedding
 from src.mongo_client import ConversationCRUD
 from datetime import datetime
+import json
 
 agent = None
 
@@ -146,7 +147,7 @@ def run_agent(thread_id: str, user_id: str, model_name: str = "openai:gpt-4o-min
         user_id: The user ID
         model_name: The model to use (default: openai:gpt-4o-mini)
         user_message: The user's message
-        
+
     Returns:
         The agent's response and conversation ID
     """
@@ -157,15 +158,45 @@ def run_agent(thread_id: str, user_id: str, model_name: str = "openai:gpt-4o-min
     messages = _build_message_history(conversation_id, user_message)
     
     # Invoke agent with complete message history
-    # streaming 
-    result = agent.invoke(
-        {"messages": messages},
-        context=Context(model=model_name)
-    )
-    
-    # Extract assistant response
-    # Extract assistant response from the messages list
-    assistant_response = result['messages'][-1]
+    assistant_response = ''
+    for chunk in agent.stream({"messages": messages}, stream_mode='messages', context=Context(model=model_name), version="v2"):
+        print(" \n\n *** RAW CHUNK:", chunk)
+        try:
+            chunk_type = chunk.get("type")
+            ns = chunk.get("ns", ())
+            message_chunk, metadata = chunk["data"]  # unpack the tuple
+
+            # Only process main agent LLM tokens (skip subagent namespaces)
+            if ns:
+                continue
+
+            if chunk_type == "messages" and metadata.get("langgraph_node") == "model":
+                content = message_chunk.content
+
+                # Standard text token
+                if isinstance(content, str) and content:
+                    assistant_response += content
+                    yield content
+
+                # Anthropic-style structured content blocks
+                elif isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            text = block.get("text", "")
+                            if text:
+                                assistant_response += text
+                                yield text
+
+                # Tool call chunks — just track/log, don't yield
+                if message_chunk.tool_call_chunks:
+                    for tc in message_chunk.tool_call_chunks:
+                        print(f"[tool call chunk] {tc}")
+
+
+        # Subagent updates (non-empty namespace)
+        except (KeyError, StopIteration):
+            pass
+
     # Add user message to conversation
     user_msg_record = {
         "role": "user",
@@ -177,12 +208,7 @@ def run_agent(thread_id: str, user_id: str, model_name: str = "openai:gpt-4o-min
     # Add assistant response to conversation
     assistant_msg_record = {
         "role": "assistant",
-        "content": assistant_response.content,
+        "content": assistant_response,
         "timestamp": datetime.now().isoformat()
     }
     ConversationCRUD.add_message(conversation_id, assistant_msg_record)
-    
-    return {
-        "conversation_id": conversation_id,
-        "result": result
-    }

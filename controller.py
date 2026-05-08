@@ -39,10 +39,10 @@ def _stream_response() -> Iterator[bytes]:
 
 @router.post("/chat")
 def chat_completion(thread_id: str, payload: ChatRequest =  Body(...)):
-    return run_agent(
+    strm_res = run_agent(
         thread_id=thread_id,
         user_id=payload.user_id,
         model_name=payload.model_name,
         user_message=payload.user_message,
     )
-    #return StreamingResponse(_stream_response(), media_type="text/plain")
+    return StreamingResponse(strm_res, media_type="text/plain")
