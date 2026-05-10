@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from langchain.chat_models import init_chat_model
-from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse
+from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse, SummarizationMiddleware
+from langgraph.checkpoint.redis import RedisSaver 
 from langchain.tools import tool
 from typing import Callable, List, Dict, Any
 from deepagents import create_deep_agent
@@ -8,6 +9,13 @@ from src.ingestion_service import query_embedding
 from src.mongo_client import ConversationCRUD
 from datetime import datetime
 import json
+
+
+redis_saver = RedisSaver(
+    redis_url="redis://localhost:6379"
+)
+
+redis_saver.setup()
 
 agent = None
 
@@ -73,9 +81,10 @@ def init_agent():
     
     agent = create_deep_agent(
         model="openai:gpt-4o-mini",  # default fallback
-        middleware=[configurable_model],
+        middleware=[configurable_model, SummarizationMiddleware(max_tokens=500, model="openai:gpt-4o-mini")],
         context_schema=Context,
         tools=tools,
+        checkpointer=redis_saver
     )
 
 
@@ -159,8 +168,15 @@ def run_agent(thread_id: str, user_id: str, model_name: str = "openai:gpt-4o-min
     
     # Invoke agent with complete message history
     assistant_response = ''
-    for chunk in agent.stream({"messages": messages}, stream_mode='messages', context=Context(model=model_name), version="v2"):
-        print(" \n\n *** RAW CHUNK:", chunk)
+    config = {
+        "configurable": {
+            "thread_id": thread_id
+        }
+    }
+    agent_state = agent.get_state(config)
+    print(f"Agent state before call:", agent_state)
+    for chunk in agent.stream({"messages": messages}, stream_mode='messages', context=Context(model=model_name), version="v2", config=config):
+        # print(" \n\n *** RAW CHUNK:", chunk)
         try:
             chunk_type = chunk.get("type")
             ns = chunk.get("ns", ())
