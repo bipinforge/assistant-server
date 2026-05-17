@@ -6,6 +6,7 @@ from src.file_service import store_file_details
 from src.assistant import init_agent, run_agent
 from fastapi import APIRouter, File, UploadFile, Body
 from fastapi.responses import StreamingResponse
+from src.conversation_history import get_conversation_history, get_conversation_history_by_thread
 
 from src.ingestion_service import query_embedding, ingest_file
 
@@ -33,6 +34,18 @@ async def upload_file(file: UploadFile = File(...)):
 async def semantic_search(query: str):
     results = query_embedding(query)
     return {"results": results}
+
+@router.get("/threads")
+async def get_threads():
+    # Placeholder implementation - replace with actual thread retrieval logic
+    threads = get_conversation_history()  # You would implement this to fetch actual threads
+    return {"threads": threads}
+
+@router.get("/messages/{thread_id}")
+async def get_messages(thread_id: str):
+    # Placeholder implementation - replace with actual thread retrieval logic
+    conversation = get_conversation_history_by_thread(thread_id)
+    return conversation
 
 def _stream_response() -> Iterator[bytes]:
     yield b"Streaming response placeholder.\n"

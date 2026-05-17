@@ -118,13 +118,12 @@ def _get_or_create_conversation(thread_id: str, user_id: str) -> str:
     return conversation_id
 
 
-def _build_message_history(conversation_id: str, user_message: str) -> List[Dict[str, str]]:
+def _build_message_history(conversation_id: str) -> List[Dict[str, str]]:
     """
     Build complete message history from database plus the new user message.
     
     Args:
         conversation_id: The conversation document ID
-        user_message: The new user message to add
         
     Returns:
         List of message dictionaries with 'role' and 'content' keys
@@ -137,11 +136,11 @@ def _build_message_history(conversation_id: str, user_message: str) -> List[Dict
         messages = conversation["messages"].copy()
     
     # Add the new user message
-    messages.append({
-        "role": "user",
-        "content": user_message,
-        "timestamp": datetime.now().isoformat()
-    })
+    # messages.append({
+    #     "role": "user",
+    #     "content": user_message,
+    #     "timestamp": datetime.now().isoformat()
+    # })
     
     return messages
 
@@ -164,8 +163,8 @@ def run_agent(thread_id: str, user_id: str, model_name: str = "openai:gpt-4o-min
     conversation_id = _get_or_create_conversation(thread_id, user_id)
     
     # Build complete message history
-    messages = _build_message_history(conversation_id, user_message)
-    
+    # messages = _build_message_history(conversation_id, user_message)
+    messages = [{"role": "user", "content": user_message}]
     # Invoke agent with complete message history
     assistant_response = ''
     config = {
@@ -173,7 +172,19 @@ def run_agent(thread_id: str, user_id: str, model_name: str = "openai:gpt-4o-min
             "thread_id": thread_id
         }
     }
+
+    # We must rebuild the state from MongoDB.
     agent_state = agent.get_state(config)
+
+    if not agent_state.values or not agent_state.values.get("messages"):
+        print(f"Cache miss for thread {thread_id}. Hydrating from MongoDB...")
+        
+        # Fetch ONLY past messages from Mongo (do not include the new user_message yet)
+        historical_messages = _build_message_history(conversation_id)
+        # Inject the historical messages back into the LangGraph state (Redis)
+        agent.update_state(config, {"messages": historical_messages})
+        print(" ***** Hydration complete. *****")
+
     print(f"Agent state before call:", agent_state)
     for chunk in agent.stream({"messages": messages}, stream_mode='messages', context=Context(model=model_name), version="v2", config=config):
         # print(" \n\n *** RAW CHUNK:", chunk)
